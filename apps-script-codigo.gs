@@ -11,7 +11,7 @@
 var ABA = 'Propostas';
 
 var COLUNAS = [
-  'id','savedAt','nome','cpf','rg','estcivil','profissao','email','telefone',
+  'id','numero','savedAt','nome','cpf','rg','estcivil','profissao','email','telefone',
   'endereco','cidade_cli','estado','cep','processo','precatorio','tribunal',
   'vara','comarca','valorprec','valorprop','data','cidade','obs'
 ];

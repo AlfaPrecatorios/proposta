@@ -115,6 +115,18 @@ tr:hover td{background:#fafbfc}
 
 .hidden{display:none!important}
 
+/* ===== TOAST ===== */
+#alfa-toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(120px);
+  background:linear-gradient(135deg,#0d0d0f,#33333a);color:#fff;padding:16px 24px;border-radius:14px;
+  display:flex;align-items:center;gap:14px;box-shadow:0 10px 40px rgba(0,0,0,.35);
+  z-index:9999;opacity:0;transition:transform .35s cubic-bezier(.2,.9,.3,1.2),opacity .35s;
+  border:1px solid rgba(255,255,255,.08);max-width:90vw}
+#alfa-toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+#alfa-toast .toast-ico{width:34px;height:34px;border-radius:50%;background:#1e9e5a;
+  display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;
+  box-shadow:0 0 0 4px rgba(30,158,90,.2)}
+#alfa-toast .toast-msg{font-size:15px;font-weight:600;letter-spacing:.3px}
+
 @media print{
   @page{size:A4 portrait;margin:0}
   body{background:#fff}
@@ -309,7 +321,7 @@ tr:hover td{background:#fafbfc}
 /* ============ CONFIGURAÇÃO GOOGLE SHEETS ============ */
 /* Cole aqui a URL do App da Web (termina em /exec) gerada no Apps Script.
    Enquanto estiver vazio, o sistema salva apenas no navegador (modo local). */
-let SHEETS_URL = localStorage.getItem('alfa_sheets_url') || "";
+let SHEETS_URL = localStorage.getItem('alfa_sheets_url') || "https://script.google.com/macros/s/AKfycbwGdOBObU4FsFGQEii7CAf1As3dtLGEhYTOuirxRyyJQfvk-LV7YcJ6UkKf1F9jmMYNDQ/exec";
 
 const PAINEL_SENHA = "Vegas4747@";
 let painelLiberado = false;
@@ -408,8 +420,10 @@ function novaProposta(){
 
 /* ============ COLETA / GERAÇÃO ============ */
 function coletar(){
+  const existente = editId ? propostas.find(x=>x.id===editId) : null;
   return {
     id: editId || Date.now(),
+    numero: existente ? existente.numero : undefined,
     nome:document.getElementById('f_nome').value.trim(),
     cpf:document.getElementById('f_cpf').value.trim(),
     rg:document.getElementById('f_rg').value.trim(),
@@ -458,15 +472,37 @@ function gerarProposta(){
 function editarDados(){ show('form'); }
 
 /* ============ SALVAR / LISTA ============ */
+function proximoNumero(){
+  let max = 0;
+  propostas.forEach(p=>{ const n = parseInt(p.numero,10); if(!isNaN(n) && n>max) max=n; });
+  return max + 1;
+}
 async function salvarProposta(){
   if(!atual) atual = coletar();
   atual.savedAt = new Date().toISOString();
+  if(!atual.numero) atual.numero = proximoNumero();
   const idx = propostas.findIndex(x=>x.id===atual.id);
   if(idx>=0) propostas[idx]=atual; else propostas.push(atual);
   editId = atual.id;
   persist();
   await sheetsSalvar(atual);
-  alert(SHEETS_URL ? 'Proposta salva no Google Sheets.' : 'Proposta salva (navegador).');
+  const num = String(atual.numero).padStart(4,'0');
+  toast('✓ Proposta nº '+num+' salva com sucesso!');
+}
+
+/* ============ NOTIFICAÇÃO (TOAST) ============ */
+let toastTimer = null;
+function toast(msg){
+  let t = document.getElementById('alfa-toast');
+  if(!t){
+    t = document.createElement('div');
+    t.id = 'alfa-toast';
+    document.body.appendChild(t);
+  }
+  t.innerHTML = '<div class="toast-ico">✔</div><div class="toast-msg">'+msg.replace('✓ ','')+'</div>';
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove('show'), 3200);
 }
 
 function renderLista(){
@@ -478,6 +514,7 @@ function renderLista(){
   const el = document.getElementById('lista');
   if(!arr.length){ el.innerHTML='<div class="card empty">Nenhuma proposta salva ainda.</div>'; return; }
   let rows = arr.map(p=>`<tr>
+    <td><strong>${p.numero? '#'+String(p.numero).padStart(4,'0') : '—'}</strong></td>
     <td>${p.data? fmtDataExtenso(p.data):'—'}</td>
     <td>${esc(p.nome)}</td>
     <td>${esc(p.processo)||'—'}</td>
@@ -491,7 +528,7 @@ function renderLista(){
       <button class="del" onclick="excluirProposta(${p.id})">Excluir</button>
     </div></td>
   </tr>`).join('');
-  el.innerHTML = `<table><thead><tr><th>Data</th><th>Beneficiário</th><th>Processo</th><th>Precatório</th><th>Valor da Proposta</th><th>Ações</th></tr></thead><tbody>${rows}</tbody></table>`;
+  el.innerHTML = `<table><thead><tr><th>Nº</th><th>Data</th><th>Beneficiário</th><th>Processo</th><th>Precatório</th><th>Valor da Proposta</th><th>Ações</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
