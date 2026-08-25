@@ -578,27 +578,37 @@ async function exportarPDF(){
   const nomeArq = 'Proposta-Alfa-'+((atual&&atual.nome)||'Cliente').trim().replace(/\s+/g,'-').replace(/[^\wÀ-ÿ-]/g,'')+'.pdf';
   const el = document.getElementById('documento');
   const JsPDF = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+  const A4_W_PX = 794;   // 210mm @ 96dpi
+  const A4_H_PX = 1123;  // 297mm @ 96dpi
   try{
-    const canvas = await html2canvas(el, {scale:2, useCORS:true, backgroundColor:'#ffffff', windowWidth: el.scrollWidth, windowHeight: el.scrollHeight});
-    const img = canvas.toDataURL('image/jpeg', 0.98);
+    const canvas = await html2canvas(el, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      width: A4_W_PX,
+      windowWidth: A4_W_PX
+    });
     const pdf = new JsPDF({unit:'mm', format:'a4', orientation:'portrait'});
-    const pw = pdf.internal.pageSize.getWidth();
-    const ph = pdf.internal.pageSize.getHeight();
+    const pw = pdf.internal.pageSize.getWidth();   // 210mm
+    const ph = pdf.internal.pageSize.getHeight();  // 297mm
+    // proporção real da captura
+    const ratio = canvas.height / canvas.width;
     let imgW = pw;
-    let imgH = canvas.height * pw / canvas.width;
-    if(imgH > ph){ imgH = ph; imgW = canvas.width * ph / canvas.height; }
-    const x = (pw - imgW) / 2;
-    pdf.addImage(img, 'JPEG', x, 0, imgW, imgH);
+    let imgH = pw * ratio;
+    // se passar da altura da página, encolhe tudo proporcionalmente para caber em UMA página
+    if(imgH > ph){
+      const escala = ph / imgH;
+      imgH = ph;
+      imgW = imgW * escala;
+    }
+    const x = (pw - imgW) / 2;   // centraliza horizontalmente
+    const y = 0;
+    const img = canvas.toDataURL('image/jpeg', 0.98);
+    pdf.addImage(img, 'JPEG', x, y, imgW, imgH);
     pdf.save(nomeArq);
   }catch(e){
     console.error('Erro ao gerar PDF:', e);
-    // fallback para o método antigo
-    html2pdf().set({
-      margin:0, filename:nomeArq,
-      image:{type:'jpeg',quality:0.98},
-      html2canvas:{scale:2,useCORS:true},
-      jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}
-    }).from(el).save();
+    alert('Não foi possível gerar o PDF. Verifique a conexão com a internet e tente novamente.');
   }
 }
 
