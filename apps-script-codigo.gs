@@ -34,9 +34,17 @@ function json_(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-/** LEITURA — retorna todas as propostas */
+/** LEITURA e GRAVAÇÃO via GET
+ *  - Sem parâmetros: retorna todas as propostas.
+ *  - Com ?payload=...: executa salvar/excluir (contorna o bloqueio de CORS do POST). */
 function doGet(e) {
   try {
+    // Se veio um payload na URL, trata como gravação/exclusão
+    if (e && e.parameter && e.parameter.payload) {
+      var body = JSON.parse(e.parameter.payload);
+      return processar_(body);
+    }
+    // Caso contrário, leitura normal
     var sh = getSheet_();
     var vals = sh.getDataRange().getValues();
     var out = [];
@@ -53,34 +61,38 @@ function doGet(e) {
   }
 }
 
-/** GRAVAÇÃO / EXCLUSÃO — recebe JSON via POST */
+/** GRAVAÇÃO / EXCLUSÃO — também aceita POST */
 function doPost(e) {
   try {
     var body = JSON.parse(e.postData.contents);
-    var sh = getSheet_();
-
-    if (body.action === 'delete') {
-      _deleteById(sh, body.id);
-      return json_({ ok: true });
-    }
-
-    // upsert (salvar/atualizar)
-    var p = body.proposta || body;
-    if (!p.id) p.id = Date.now();
-    p.savedAt = new Date().toISOString();
-
-    var rowIndex = _findRow(sh, p.id);
-    var linha = COLUNAS.map(function (k) { return p[k] != null ? p[k] : ''; });
-
-    if (rowIndex > 0) {
-      sh.getRange(rowIndex, 1, 1, COLUNAS.length).setValues([linha]);
-    } else {
-      sh.appendRow(linha);
-    }
-    return json_({ ok: true, id: p.id });
+    return processar_(body);
   } catch (err) {
     return json_({ ok: false, error: String(err) });
   }
+}
+
+/** Lógica central de salvar/excluir, usada por doGet e doPost */
+function processar_(body) {
+  var sh = getSheet_();
+
+  if (body.action === 'delete') {
+    _deleteById(sh, body.id);
+    return json_({ ok: true });
+  }
+
+  var p = body.proposta || body;
+  if (!p.id) p.id = Date.now();
+  p.savedAt = new Date().toISOString();
+
+  var rowIndex = _findRow(sh, p.id);
+  var linha = COLUNAS.map(function (k) { return p[k] != null ? p[k] : ''; });
+
+  if (rowIndex > 0) {
+    sh.getRange(rowIndex, 1, 1, COLUNAS.length).setValues([linha]);
+  } else {
+    sh.appendRow(linha);
+  }
+  return json_({ ok: true, id: p.id });
 }
 
 function _findRow(sh, id) {

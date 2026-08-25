@@ -193,6 +193,8 @@ tr:hover td{background:#fafbfc}
         <input id="busca" placeholder="Pesquisar por nome, CPF, processo ou precatório..." oninput="renderLista()">
       </div>
       <button class="btn btn-ghost" onclick="novaProposta()">+ Nova</button>
+      <button class="btn btn-ghost" onclick="testarConexao()">🔌 Testar Conexão</button>
+      <button class="btn btn-ghost" onclick="configurarSheets()">⚙ Conectar Sheets</button>
       <button class="btn btn-ghost" onclick="bloquearPainel()">🔒 Fechar Painel</button>
     </div>
     <div id="lista"></div>
@@ -343,7 +345,20 @@ tr:hover td{background:#fafbfc}
 /* ============ CONFIGURAÇÃO GOOGLE SHEETS ============ */
 /* Cole aqui a URL do App da Web (termina em /exec) gerada no Apps Script.
    Enquanto estiver vazio, o sistema salva apenas no navegador (modo local). */
-let SHEETS_URL = localStorage.getItem('alfa_sheets_url') || "https://script.google.com/macros/s/AKfycbxwbTuliH-JcBNrhipcDmK5cZqz2-7lpUxjAgS-vqGHkDcaA72SrdiaAWTy1A6-GRZrhA/exec";
+const SHEETS_URL_PADRAO = "https://script.google.com/macros/s/AKfycbw-OlEbS4ztzSapwZMzbIDQ_6PZoPGTfHuz2KxQMr2QjKLJHqCOUV6iOGSFrkuzB4AfWA/exec";
+
+/* Limpa URL malformada (ex.: duas URLs coladas por engano) */
+function limparUrl(u){
+  if(!u) return "";
+  u = u.trim();
+  const partes = u.split(/https:\/\//).filter(Boolean);
+  if(partes.length > 1){ u = "https://" + partes[partes.length-1]; }
+  const m = u.match(/^https:\/\/script\.google\.com\/macros\/s\/[^\/]+\/exec/);
+  return m ? m[0] : u;
+}
+
+let SHEETS_URL = limparUrl(localStorage.getItem('alfa_sheets_url') || SHEETS_URL_PADRAO);
+localStorage.setItem('alfa_sheets_url', SHEETS_URL);
 
 const PAINEL_SENHA = "Vegas4747@";
 let painelLiberado = false;
@@ -365,7 +380,6 @@ async function sheetsCarregar(){
       const remotas = j.data
         .filter(p=>p && p.id)
         .map(p=>({...p, id: Number(p.id)||p.id, numero: p.numero!=='' ? p.numero : undefined}));
-      // mescla: remoto tem prioridade, mas mantém locais que ainda não subiram
       const mapa = {};
       propostas.forEach(p=>{ mapa[p.id]=p; });
       remotas.forEach(p=>{ mapa[p.id]=p; });
@@ -376,31 +390,58 @@ async function sheetsCarregar(){
   }catch(e){ console.warn('Falha ao ler Sheets:', e); }
   return false;
 }
+
+/* Salva via GET com os dados codificados na URL.
+   Isso evita o bloqueio de CORS do POST e PERMITE ler a resposta
+   do Apps Script, confirmando de verdade se gravou. */
 async function sheetsSalvar(p){
-  if(!SHEETS_URL) return;
-  await fetch(SHEETS_URL, {
-    method:'POST',
-    mode:'no-cors',
-    headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body: JSON.stringify({action:'upsert', proposta:p})
-  });
+  if(!SHEETS_URL) return {ok:false, motivo:'sem_url'};
+  try{
+    const payload = encodeURIComponent(JSON.stringify({action:'upsert', proposta:p}));
+    const url = SHEETS_URL + '?payload=' + payload;
+    const r = await fetch(url, {method:'GET'});
+    const j = await r.json();
+    return j;
+  }catch(e){
+    console.warn('Erro sheetsSalvar:', e);
+    return {ok:false, motivo:String(e)};
+  }
 }
 async function sheetsExcluir(id){
-  if(!SHEETS_URL) return;
-  await fetch(SHEETS_URL, {
-    method:'POST',
-    mode:'no-cors',
-    headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body: JSON.stringify({action:'delete', id:id})
-  });
+  if(!SHEETS_URL) return {ok:false};
+  try{
+    const payload = encodeURIComponent(JSON.stringify({action:'delete', id:id}));
+    const r = await fetch(SHEETS_URL + '?payload=' + payload, {method:'GET'});
+    return await r.json();
+  }catch(e){ return {ok:false, motivo:String(e)}; }
 }
+
+/* Testa a conexão e mostra o resultado claramente na tela */
+async function testarConexao(){
+  if(!SHEETS_URL){ alert('Nenhuma URL configurada. Use "Conectar Sheets".'); return; }
+  toast('⏳ Testando conexão...');
+  try{
+    const r = await fetch(SHEETS_URL, {method:'GET'});
+    const txt = await r.text();
+    let j;
+    try{ j = JSON.parse(txt); }catch(_){ j = null; }
+    if(j && j.ok){
+      alert('✅ CONEXÃO OK!\n\nA planilha respondeu corretamente.\nPropostas na nuvem: ' + (j.data ? j.data.length : 0) + '\n\nURL:\n' + SHEETS_URL);
+    }else{
+      alert('⚠️ A URL respondeu, mas NÃO no formato esperado.\n\nIsso quase sempre significa que a implantação NÃO está pública, ou a URL não é a do "app da Web".\n\nResposta recebida (início):\n' + txt.slice(0,200));
+    }
+  }catch(e){
+    alert('❌ NÃO foi possível conectar.\n\nPossíveis causas:\n• URL errada\n• Implantação não está como "Qualquer pessoa"\n• Sem internet\n\nDetalhe técnico:\n' + String(e) + '\n\nURL testada:\n' + SHEETS_URL);
+  }
+}
+
 function configurarSheets(){
   const atualUrl = SHEETS_URL || '';
   const nova = prompt('Cole a URL do App da Web do Google Sheets (termina em /exec).\nDeixe em branco para usar apenas o navegador:', atualUrl);
   if(nova===null) return;
-  SHEETS_URL = nova.trim();
+  SHEETS_URL = limparUrl(nova);
   localStorage.setItem('alfa_sheets_url', SHEETS_URL);
-  alert(SHEETS_URL ? 'Google Sheets conectado.' : 'Modo local ativado (apenas navegador).');
+  alert(SHEETS_URL ? ('Conectado a:\n'+SHEETS_URL) : 'Modo local ativado (apenas navegador).');
   renderLista();
 }
 
@@ -519,15 +560,24 @@ async function salvarProposta(){
   editId = atual.id;
   persist();
 
+  let resultado = null;
   try{
-    await sheetsSalvar(atual);
+    resultado = await sheetsSalvar(atual);
   }catch(e){
     console.warn('Sheets:', e);
   }
 
   if(btn){ btn.disabled = false; btn.innerHTML = textoOriginal; }
   const num = String(atual.numero).padStart(4,'0');
-  toast('✓ Proposta nº '+num+' salva com sucesso!');
+  if(SHEETS_URL){
+    if(resultado && resultado.ok){
+      toast('✓ Proposta nº '+num+' salva na nuvem!');
+    }else{
+      toast('⚠ Proposta nº '+num+' salva no navegador (nuvem falhou)');
+    }
+  }else{
+    toast('✓ Proposta nº '+num+' salva com sucesso!');
+  }
 }
 
 /* ============ NOTIFICAÇÃO (TOAST) ============ */
