@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Alfa Precatórios — Sistema de Propostas</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
 :root{
@@ -321,7 +323,7 @@ tr:hover td{background:#fafbfc}
 /* ============ CONFIGURAÇÃO GOOGLE SHEETS ============ */
 /* Cole aqui a URL do App da Web (termina em /exec) gerada no Apps Script.
    Enquanto estiver vazio, o sistema salva apenas no navegador (modo local). */
-let SHEETS_URL = localStorage.getItem('alfa_sheets_url') || "https://script.google.com/macros/s/AKfycbwGdOBObU4FsFGQEii7CAf1As3dtLGEhYTOuirxRyyJQfvk-LV7YcJ6UkKf1F9jmMYNDQ/exec";
+let SHEETS_URL = localStorage.getItem('alfa_sheets_url') || "";
 
 const PAINEL_SENHA = "Vegas4747@";
 let painelLiberado = false;
@@ -572,17 +574,32 @@ function pdfProposta(id){ atual=getById(id); editId=id; renderDoc(atual); show('
 function imprimirProposta(id){ atual=getById(id); editId=id; renderDoc(atual); show('preview'); setTimeout(()=>window.print(),250); }
 
 /* ============ PDF ============ */
-function exportarPDF(){
+async function exportarPDF(){
   const nomeArq = 'Proposta-Alfa-'+((atual&&atual.nome)||'Cliente').trim().replace(/\s+/g,'-').replace(/[^\wÀ-ÿ-]/g,'')+'.pdf';
   const el = document.getElementById('documento');
-  html2pdf().set({
-    margin:0,
-    filename:nomeArq,
-    image:{type:'jpeg',quality:0.98},
-    html2canvas:{scale:2,useCORS:true,windowWidth:794},
-    jsPDF:{unit:'mm',format:'a4',orientation:'portrait'},
-    pagebreak:{mode:['css','legacy'], avoid:['.steps','.step','.docs','.p-foot','.proposta-val','.info-table','.blk-title']}
-  }).from(el).save();
+  const JsPDF = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+  try{
+    const canvas = await html2canvas(el, {scale:2, useCORS:true, backgroundColor:'#ffffff', windowWidth: el.scrollWidth, windowHeight: el.scrollHeight});
+    const img = canvas.toDataURL('image/jpeg', 0.98);
+    const pdf = new JsPDF({unit:'mm', format:'a4', orientation:'portrait'});
+    const pw = pdf.internal.pageSize.getWidth();
+    const ph = pdf.internal.pageSize.getHeight();
+    let imgW = pw;
+    let imgH = canvas.height * pw / canvas.width;
+    if(imgH > ph){ imgH = ph; imgW = canvas.width * ph / canvas.height; }
+    const x = (pw - imgW) / 2;
+    pdf.addImage(img, 'JPEG', x, 0, imgW, imgH);
+    pdf.save(nomeArq);
+  }catch(e){
+    console.error('Erro ao gerar PDF:', e);
+    // fallback para o método antigo
+    html2pdf().set({
+      margin:0, filename:nomeArq,
+      image:{type:'jpeg',quality:0.98},
+      html2canvas:{scale:2,useCORS:true},
+      jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}
+    }).from(el).save();
+  }
 }
 
 /* ============ PAINEL COM SENHA ============ */
