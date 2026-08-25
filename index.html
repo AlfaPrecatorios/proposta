@@ -140,13 +140,27 @@ tr:hover td{background:#fafbfc}
   </div>
 
   <div style="margin-top:26px">
-    <div class="toolbar">
-      <div class="search">
-        <input id="busca" placeholder="Pesquisar por nome, CPF, processo ou precatório..." oninput="renderLista()">
-      </div>
-      <button class="btn btn-ghost" onclick="novaProposta()">+ Nova</button>
+    <!-- Cadeado do painel -->
+    <div id="painel-lock" class="card" style="text-align:center;padding:40px">
+      <div style="font-size:34px;margin-bottom:8px">🔒</div>
+      <h3 style="border:none;padding:0;letter-spacing:1px;color:#0d0d0f;margin-bottom:6px">PAINEL DE PROPOSTAS SALVAS</h3>
+      <p style="color:#6b6e73;font-size:13px;margin-bottom:18px">Acesso protegido por senha.</p>
+      <button class="btn btn-primary" onclick="abrirPainel()">Acessar Painel</button>
     </div>
-    <div id="lista"></div>
+
+    <!-- Painel liberado -->
+    <div id="painel-box" class="hidden">
+      <div class="toolbar">
+        <div class="search">
+          <input id="busca" placeholder="Pesquisar por nome, CPF, processo ou precatório..." oninput="renderLista()">
+        </div>
+        <button class="btn btn-ghost" onclick="novaProposta()">+ Nova</button>
+        <button class="btn btn-ghost" onclick="sheetsCarregar().then(renderLista)">↻ Sincronizar</button>
+        <button class="btn btn-ghost" onclick="configurarSheets()">⚙ Conectar Sheets</button>
+        <button class="btn btn-ghost" onclick="bloquearPainel()">🔒 Bloquear</button>
+      </div>
+      <div id="lista"></div>
+    </div>
   </div>
 </div>
 
@@ -291,12 +305,64 @@ tr:hover td{background:#fafbfc}
 </div>
 
 <script>
+/* ============ CONFIGURAÇÃO GOOGLE SHEETS ============ */
+/* Cole aqui a URL do App da Web (termina em /exec) gerada no Apps Script.
+   Enquanto estiver vazio, o sistema salva apenas no navegador (modo local). */
+let SHEETS_URL = localStorage.getItem('alfa_sheets_url') || "https://script.google.com/macros/s/AKfycbzGb14jRONUtMQMDuBMgpfjucb4X14Tv1dr_BBiniazVBpaeFeRYN5ZsSLdB0Z2VKuW1A/exec";
+
+const PAINEL_SENHA = "Vegas4747@";
+let painelLiberado = false;
+
 /* ============ ESTADO ============ */
 let propostas = [];
 let editId = null;
 
 function load(){ try{ propostas = JSON.parse(localStorage.getItem('alfa_props')||'[]'); }catch(e){ propostas=[]; } }
 function persist(){ localStorage.setItem('alfa_props', JSON.stringify(propostas)); }
+
+/* ============ SINCRONIZAÇÃO COM O SHEETS ============ */
+async function sheetsCarregar(){
+  if(!SHEETS_URL) return false;
+  try{
+    const r = await fetch(SHEETS_URL, {method:'GET'});
+    const j = await r.json();
+    if(j.ok && Array.isArray(j.data)){
+      propostas = j.data.map(p=>({...p, id: Number(p.id)||p.id}));
+      persist();
+      return true;
+    }
+  }catch(e){ console.warn('Falha ao ler Sheets:', e); }
+  return false;
+}
+async function sheetsSalvar(p){
+  if(!SHEETS_URL) return;
+  try{
+    await fetch(SHEETS_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({action:'upsert', proposta:p})
+    });
+  }catch(e){ console.warn('Falha ao gravar no Sheets:', e); }
+}
+async function sheetsExcluir(id){
+  if(!SHEETS_URL) return;
+  try{
+    await fetch(SHEETS_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({action:'delete', id:id})
+    });
+  }catch(e){ console.warn('Falha ao excluir no Sheets:', e); }
+}
+function configurarSheets(){
+  const atualUrl = SHEETS_URL || '';
+  const nova = prompt('Cole a URL do App da Web do Google Sheets (termina em /exec).\nDeixe em branco para usar apenas o navegador:', atualUrl);
+  if(nova===null) return;
+  SHEETS_URL = nova.trim();
+  localStorage.setItem('alfa_sheets_url', SHEETS_URL);
+  alert(SHEETS_URL ? 'Google Sheets conectado.' : 'Modo local ativado (apenas navegador).');
+  renderLista();
+}
 
 /* ============ MÁSCARAS ============ */
 function maskMoney(el){
@@ -391,19 +457,21 @@ function gerarProposta(){
 function editarDados(){ show('form'); }
 
 /* ============ SALVAR / LISTA ============ */
-function salvarProposta(){
+async function salvarProposta(){
   if(!atual) atual = coletar();
   atual.savedAt = new Date().toISOString();
   const idx = propostas.findIndex(x=>x.id===atual.id);
   if(idx>=0) propostas[idx]=atual; else propostas.push(atual);
   editId = atual.id;
   persist();
-  alert('Proposta salva com sucesso.');
+  await sheetsSalvar(atual);
+  alert(SHEETS_URL ? 'Proposta salva no Google Sheets.' : 'Proposta salva (navegador).');
 }
 
 function renderLista(){
-  load();
-  const q = (document.getElementById('busca').value||'').toLowerCase();
+  if(!document.getElementById('painel-box') || document.getElementById('painel-box').classList.contains('hidden')) return;
+  const buscaEl = document.getElementById('busca');
+  const q = ((buscaEl && buscaEl.value)||'').toLowerCase();
   let arr = propostas.slice().sort((a,b)=>(b.savedAt||'').localeCompare(a.savedAt||''));
   if(q) arr = arr.filter(p=>[p.nome,p.cpf,p.processo,p.precatorio].some(f=>(f||'').toLowerCase().includes(q)));
   const el = document.getElementById('lista');
@@ -455,9 +523,11 @@ function editarProposta(id){
   document.getElementById('f_obs').value=g('obs')||OBS_PADRAO;
   show('form');
 }
-function excluirProposta(id){
+async function excluirProposta(id){
   if(!confirm('Excluir esta proposta?')) return;
-  propostas = propostas.filter(x=>x.id!==id); persist(); renderLista();
+  propostas = propostas.filter(x=>x.id!==id); persist();
+  await sheetsExcluir(id);
+  renderLista();
 }
 function verProposta(id){ atual=getById(id); editId=id; renderDoc(atual); show('preview'); }
 function pdfProposta(id){ atual=getById(id); editId=id; renderDoc(atual); show('preview'); setTimeout(exportarPDF,250); }
@@ -476,10 +546,34 @@ function exportarPDF(){
   }).from(el).save();
 }
 
+/* ============ PAINEL COM SENHA ============ */
+function abrirPainel(){
+  if(painelLiberado){ document.getElementById('painel-box').classList.remove('hidden'); document.getElementById('painel-lock').classList.add('hidden'); return; }
+  const s = prompt('Digite a senha para acessar o painel de propostas salvas:');
+  if(s===null) return;
+  if(s===PAINEL_SENHA){
+    painelLiberado = true;
+    document.getElementById('painel-box').classList.remove('hidden');
+    document.getElementById('painel-lock').classList.add('hidden');
+    renderLista();
+  } else {
+    alert('Senha incorreta.');
+  }
+}
+function bloquearPainel(){
+  painelLiberado = false;
+  document.getElementById('painel-box').classList.add('hidden');
+  document.getElementById('painel-lock').classList.remove('hidden');
+}
+
 /* ============ INIT ============ */
-load();
-renderLista();
-show('home');
+async function init(){
+  load();
+  await sheetsCarregar();
+  renderLista();
+  show('home');
+}
+init();
 </script>
 </body>
 </html>
