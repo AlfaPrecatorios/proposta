@@ -362,7 +362,14 @@ async function sheetsCarregar(){
     const r = await fetch(SHEETS_URL, {method:'GET'});
     const j = await r.json();
     if(j.ok && Array.isArray(j.data)){
-      propostas = j.data.map(p=>({...p, id: Number(p.id)||p.id}));
+      const remotas = j.data
+        .filter(p=>p && p.id)
+        .map(p=>({...p, id: Number(p.id)||p.id, numero: p.numero!=='' ? p.numero : undefined}));
+      // mescla: remoto tem prioridade, mas mantém locais que ainda não subiram
+      const mapa = {};
+      propostas.forEach(p=>{ mapa[p.id]=p; });
+      remotas.forEach(p=>{ mapa[p.id]=p; });
+      propostas = Object.values(mapa);
       persist();
       return true;
     }
@@ -371,23 +378,21 @@ async function sheetsCarregar(){
 }
 async function sheetsSalvar(p){
   if(!SHEETS_URL) return;
-  try{
-    await fetch(SHEETS_URL, {
-      method:'POST',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body: JSON.stringify({action:'upsert', proposta:p})
-    });
-  }catch(e){ console.warn('Falha ao gravar no Sheets:', e); }
+  await fetch(SHEETS_URL, {
+    method:'POST',
+    mode:'no-cors',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify({action:'upsert', proposta:p})
+  });
 }
 async function sheetsExcluir(id){
   if(!SHEETS_URL) return;
-  try{
-    await fetch(SHEETS_URL, {
-      method:'POST',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body: JSON.stringify({action:'delete', id:id})
-    });
-  }catch(e){ console.warn('Falha ao excluir no Sheets:', e); }
+  await fetch(SHEETS_URL, {
+    method:'POST',
+    mode:'no-cors',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify({action:'delete', id:id})
+  });
 }
 function configurarSheets(){
   const atualUrl = SHEETS_URL || '';
@@ -500,6 +505,12 @@ function proximoNumero(){
   return max + 1;
 }
 async function salvarProposta(){
+  // feedback visual no botão
+  const btns = Array.from(document.querySelectorAll('button')).filter(b=>/salvar proposta/i.test(b.textContent));
+  const btn = btns[0];
+  let textoOriginal = '';
+  if(btn){ textoOriginal = btn.innerHTML; btn.disabled = true; btn.innerHTML = '⏳ Salvando...'; }
+
   if(!atual) atual = coletar();
   atual.savedAt = new Date().toISOString();
   if(!atual.numero) atual.numero = proximoNumero();
@@ -507,7 +518,14 @@ async function salvarProposta(){
   if(idx>=0) propostas[idx]=atual; else propostas.push(atual);
   editId = atual.id;
   persist();
-  await sheetsSalvar(atual);
+
+  try{
+    await sheetsSalvar(atual);
+  }catch(e){
+    console.warn('Sheets:', e);
+  }
+
+  if(btn){ btn.disabled = false; btn.innerHTML = textoOriginal; }
   const num = String(atual.numero).padStart(4,'0');
   toast('✓ Proposta nº '+num+' salva com sucesso!');
 }
